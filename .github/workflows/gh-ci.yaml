@@ -93,7 +93,7 @@ jobs:
 
     - name: Run tests with merged coverage
       run: |
-        pytest -n auto -v --cov=imdclient --cov-report=xml --color=yes test_imdclient.py
+        pytest -n auto -v --cov=imdclient --cov-report=xml --color=yes python_tests/test_imdclient.py
 
     - name: codecov
       if: github.event_name != 'schedule'
