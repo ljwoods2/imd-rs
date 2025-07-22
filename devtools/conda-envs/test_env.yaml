@@ -1,0 +1,19 @@
+name: imdclient-rs-test
+channels:
+  - conda-forge
+dependencies:
+  # Base depends
+  - python
+  - pip
+  - numpy
+  - maturin
+  - imdclient
+
+  # Testing
+  - pytest
+  - pytest-cov
+  - pytest-xdist
+  - codecov
+  - MDAnalysis
+  - MDAnalysisTests
+  - docker-py

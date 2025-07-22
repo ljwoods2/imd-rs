@@ -11,10 +11,10 @@ path         = "src/main.rs"
 
 [features]
 default = ["python"]
-python = ["pyo3", "numpy"]
+python = ["pyo3"]
 
 [dependencies]
-pyo3 = { version = "0.25", features = ["extension-module"] }
+pyo3 = { version = "0.25", features = ["extension-module"], optional = true }
 numpy = { version = "0.25" }
 log = "0.4"
 byteorder = "1.5"

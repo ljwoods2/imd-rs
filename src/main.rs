@@ -312,49 +312,35 @@ impl IMDServer {
 
 #[cfg(feature = "python")]
 mod python_bindings {
-    use super::IMDClient;
+    use super::IMDClient as RustIMDClient;
     use pyo3::prelude::*;
 
     #[pyclass]
-    pub struct PyIMDClient {
-        inner: IMDClient,
+    pub struct IMDClient {
+        inner: RustIMDClient,
     }
 
     #[pymethods]
-    impl PyIMDClient {
+    impl IMDClient {
         #[new]
         fn new(host: &str, port: u16) -> PyResult<Self> {
             let addr = format!("{}:{}", host, port);
-            let client = IMDClient::new(addr)
-            Ok(PyIMDClient {
-                inner: client,
-            })
+            let client = RustIMDClient::new(addr)?;
+            Ok(IMDClient { inner: client })
         }
 
-        fn get_imdframe(&mut self) -> PyResult<Self> {
+        fn get_imdframe(&self) -> PyResult<()> {
             unimplemented!()
         }
 
-        fn get_imdsessioninfo(&mut self) -> PyResult<Self> {
+        fn get_imdsessioninfo(&self) -> PyResult<()> {
             unimplemented!()
         }
-
-        // fn write(&mut self, data: &[u8]) -> PyResult<usize> {
-        //     self.inner
-        //         .write_bytes(data)
-        //         .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))
-        // }
-
-        // fn read(&mut self, size: usize) -> PyResult<Vec<u8>> {
-        //     self.inner
-        //         .read_bytes(size)
-        //         .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))
-        // }
     }
 
     #[pymodule]
-    fn imdclient(_py: Python, m: &PyModule) -> PyResult<()> {
-        m.add_class::<PyIMDClient>()?;
+    fn quickstream(m: &Bound<'_, PyModule>) -> PyResult<()> {
+        m.add_class::<IMDClient>()?;
         Ok(())
     }
 }
