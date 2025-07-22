@@ -2,3 +2,19 @@
 name = "imd-rs"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+
+[lib]
+name         = "imd"
+crate-type   = ["cdylib"]
+path         = "src/main.rs" 
+
+[features]
+default = ["python"]
+python = ["pyo3", "numpy"]
+
+[dependencies]
+pyo3 = { version = "0.25", features = ["extension-module"] }
+numpy = { version = "0.25" }
+log = "0.4"
+byteorder = "1.5"
