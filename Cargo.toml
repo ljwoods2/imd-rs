@@ -7,7 +7,7 @@ license = "MIT"
 [lib]
 name         = "imd"
 crate-type   = ["cdylib"]
-path         = "src/main.rs" 
+path         = "src/lib.rs" 
 
 [features]
 default = ["python"]
@@ -18,3 +18,5 @@ pyo3 = { version = "0.25", features = ["extension-module"], optional = true }
 numpy = { version = "0.25" }
 log = "0.4"
 byteorder = "1.5"
+crossbeam-channel = "0.5"
+ndarray = { version = "0.16" }

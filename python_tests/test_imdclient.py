@@ -15,10 +15,10 @@ from quickstream import IMDClient
 
 from imdclient.IMDClient import imdframe_memsize
 from imdclient.IMDProtocol import IMDHeaderType
-from .utils import (
+from imdclient.tests.utils import (
     create_default_imdsinfo_v3,
 )
-from .server import InThreadIMDServer
+from imdclient.tests.server import InThreadIMDServer
 
 
 # logger = logging.getLogger("imdclient.IMDClient")
@@ -98,6 +98,19 @@ class TestIMDClientV3:
         yield server, client
         client.stop()
         server.cleanup()
+
+    def test_handshake(self, universe, imdsinfo):
+        server = InThreadIMDServer(universe.trajectory)
+        server.set_imdsessioninfo(imdsinfo)
+        server.handshake_sequence("localhost", first_frame=False)
+        client = IMDClient(
+            f"localhost",
+            server.port,
+            universe.atoms.n_atoms + 1,
+        )
+        server.join_accept_thread()
+        print(client.get_imdsessioninfo())
+        server.send_frame(0)
 
     def test_traj_unchanged(self, server_client, universe):
         server, client = server_client
