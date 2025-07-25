@@ -1,10 +1,10 @@
-use byteorder::{BigEndian, ByteOrder, ReadBytesExt, WriteBytesExt};
+use byteorder::{BigEndian, ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use log::{debug, error, info, trace, warn};
 use ndarray::Array2;
 use pyo3::prelude::*;
 use std::{
-    io::{self, ErrorKind, Read, Write},
+    io::{self, BufReader, ErrorKind, Read, Write},
     net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs},
     rc::Rc,
     thread::{self, JoinHandle},
@@ -86,9 +86,10 @@ impl IMDHeader {
         Ok(())
     }
 
-    pub fn from_reader(reader: &mut impl ReadBytesExt) -> io::Result<Self> {
+    fn from_reader(reader: &mut impl ReadBytesExt) -> io::Result<Self> {
         println!("Reading header type val");
         let header_type_val = reader.read_i32::<BigEndian>()?;
+
         println!("Reading length");
         let length = reader.read_i32::<BigEndian>()?;
 
@@ -99,6 +100,18 @@ impl IMDHeader {
             header_type,
             length,
         })
+    }
+
+    fn refill_from_reader(&mut self, reader: &mut impl ReadBytesExt) -> io::Result<()> {
+        self.header_type = IMDMessageType::try_from(reader.read_i32::<BigEndian>()?)
+            .map_err(|e| io::Error::new(ErrorKind::InvalidData, e))?;
+
+        self.length = reader.read_i32::<BigEndian>()?;
+
+        println!("{:?}", self.header_type);
+        println!("{:?}", self.length);
+
+        Ok(())
     }
 
     fn new(header_type: IMDMessageType, length: i32) -> Self {
@@ -202,7 +215,7 @@ pub struct IMDEnergies {
 }
 #[derive(Debug, Clone, Copy)]
 pub struct IMDTime {
-    pub step: i32,
+    pub step: i64,
     pub dt: f64,
     pub time: f64,
 }
@@ -272,85 +285,95 @@ impl IMDFrame {
     // fn load_xvf_from(&mut self, R: &mut impl ReadBytesExt, buf: &mut Vec<u8>) {}
 }
 
-struct IMDProducerV2 {
-    energy_buf: Option<Vec<u8>>,
-    xvf_buf: Option<Vec<u8>>,
-}
+// enum IMDVersion {
+//     V2,
+//     V3,
+// }
 
-impl IMDProducerV2 {
-    fn new(sinfo: IMDSessionInfo, n_atoms: u64) -> IMDProducerV2 {
-        unimplemented!()
-    }
-    fn parse_imdframe(
-        &self,
-        reader: &mut impl ReadBytesExt,
-        empty_frame: IMDFrame,
-    ) -> io::Result<IMDFrame> {
-        unimplemented!()
-    }
-}
-struct IMDProducerV3 {
-    time_buf: Option<Vec<u8>>,
-    energy_buf: Option<Vec<u8>>,
-    xvf_buf: Option<Vec<u8>>,
-    box_buf: Option<Vec<u8>>,
-}
+// struct IMDProducerV2 {
+//     energy_buf: Option<Vec<u8>>,
+//     xvf_buf: Option<Vec<u8>>,
+// }
 
-impl IMDProducerV3 {
-    fn new(sinfo: IMDSessionInfo, n_atoms: u64) -> IMDProducerV3 {
-        let time_buf: Option<Vec<u8>> = match sinfo.time {
-            true => Some(vec![0u8; 40]),
-            false => None,
-        };
+// impl IMDProducerV2 {
+//     fn new(sinfo: IMDSessionInfo, n_atoms: u64) -> IMDProducerV2 {
+//         unimplemented!()
+//     }
+//     fn parse_imdframe(
+//         &self,
+//         reader: &mut impl ReadBytesExt,
+//         empty_frame: IMDFrame,
+//     ) -> io::Result<IMDFrame> {
+//         unimplemented!()
+//     }
+// }
+// struct IMDProducerV3 {
+//     time_buf: Option<Vec<u8>>,
+//     energy_buf: Option<Vec<u8>>,
+//     xvf_buf: Option<Vec<u8>>,
+//     box_buf: Option<Vec<u8>>,
+// }
 
-        let xvf_buf: Option<Vec<u8>> = match sinfo.positions | sinfo.velocities | sinfo.forces {
-            // 4 bytes * n atoms * 3
-            true => Some(vec![0u8; 12 * n_atoms as usize]),
-            false => None,
-        };
+// impl IMDProducerV3 {
+//     fn new(sinfo: IMDSessionInfo, n_atoms: u64) -> IMDProducerV3 {
+//         let time_buf: Option<Vec<u8>> = match sinfo.time {
+//             true => Some(vec![0u8; 40]),
+//             false => None,
+//         };
 
-        let box_buf: Option<Vec<u8>> = match sinfo.box_info {
-            // 4 bytes * 9
-            true => Some(vec![0u8; 36]),
-            false => None,
-        };
+//         let xvf_buf: Option<Vec<u8>> = match sinfo.positions | sinfo.velocities | sinfo.forces {
+//             // 4 bytes * n atoms * 3
+//             true => Some(vec![0u8; 12 * n_atoms as usize]),
+//             false => None,
+//         };
 
-        let energy_buf: Option<Vec<u8>> = match sinfo.energies {
-            // 4 bytes * 10
-            true => Some(vec![0u8; 40]),
-            false => None,
-        };
+//         let box_buf: Option<Vec<u8>> = match sinfo.box_info {
+//             // 4 bytes * 9
+//             true => Some(vec![0u8; 36]),
+//             false => None,
+//         };
 
-        IMDProducerV3 {
-            time_buf,
-            energy_buf,
-            xvf_buf,
-            box_buf,
-        }
-    }
+//         let energy_buf: Option<Vec<u8>> = match sinfo.energies {
+//             // 4 bytes * 10
+//             true => Some(vec![0u8; 40]),
+//             false => None,
+//         };
 
-    fn parse_imdframe(
-        &self,
-        reader: &mut impl ReadBytesExt,
-        empty_frame: IMDFrame,
-    ) -> io::Result<IMDFrame> {
-        unimplemented!()
-    }
-}
+//         IMDProducerV3 {
+//             time_buf,
+//             energy_buf,
+//             xvf_buf,
+//             box_buf,
+//         }
+//     }
 
-enum IMDProducerType {
-    V2(IMDProducerV2),
-    V3(IMDProducerV3),
-}
+//     fn parse_imdframe(
+//         &self,
+//         reader: &mut impl ReadBytesExt,
+//         empty_frame: IMDFrame,
+//     ) -> io::Result<IMDFrame> {
+//         unimplemented!()
+//     }
+// }
+
+// enum IMDProducerType {
+//     V2(IMDProducerV2),
+//     V3(IMDProducerV3),
+// }
 
 struct IMDProducer {
     conn: TcpStream,
+    reader: BufReader<TcpStream>,
     empty_recv: Receiver<IMDFrame>,
     full_send: Sender<IMDFrame>,
     sinfo: IMDSessionInfo,
     n_atoms: u64,
-    version_handler: IMDProducerType,
     paused: bool,
+    header_buf: IMDHeader,
+    time_buf: Option<[u8; 24]>,
+    energy_buf: Option<[u8; 40]>,
+    xvf_buf: Option<Vec<u8>>,
+    box_buf: Option<[u8; 36]>,
 }
 
 impl IMDProducer {
@@ -361,30 +384,53 @@ impl IMDProducer {
         sinfo: IMDSessionInfo,
         n_atoms: u64,
     ) -> io::Result<Self> {
-        let version_handler = match sinfo.version {
-            2 => IMDProducerType::V2(IMDProducerV2::new(sinfo, n_atoms)),
-            3 => IMDProducerType::V3(IMDProducerV3::new(sinfo, n_atoms)),
-            _ => {
-                return Err(io::Error::new(
-                    ErrorKind::InvalidData,
-                    format!("Unsupported IMD version: {}", sinfo.version),
-                ))
-            }
+        // just fill it with placeholder values
+        let header_buf = IMDHeader::new(IMDMessageType::IOError, 0);
+
+        let time_buf: Option<[u8; 24]> = match sinfo.time {
+            true => Some([0u8; 24]),
+            false => None,
         };
+
+        let xvf_buf: Option<Vec<u8>> = match sinfo.positions | sinfo.velocities | sinfo.forces {
+            // 4 bytes * n atoms * 3
+            true => Some(vec![0u8; 12 * n_atoms as usize]),
+            false => None,
+        };
+
+        let box_buf: Option<[u8; 36]> = match sinfo.box_info {
+            // 4 bytes * 9
+            true => Some([0u8; 36]),
+            false => None,
+        };
+        let energy_buf: Option<[u8; 40]> = match sinfo.energies {
+            // 4 bytes * 10
+            true => Some([0u8; 40]),
+            false => None,
+        };
+
+        let reader = BufReader::new(conn.try_clone()?);
 
         Ok(IMDProducer {
             conn,
+            reader,
             empty_recv,
             full_send,
             sinfo,
             n_atoms,
-            version_handler,
             paused: false,
+            header_buf,
+            time_buf,
+            energy_buf,
+            xvf_buf,
+            box_buf,
         })
     }
 
     pub fn run(&mut self) -> io::Result<()> {
+        println!("I'm the producer and I'm starting");
         loop {
+            print!("starting loop");
             let empty_frame = match self.empty_recv.recv() {
                 Ok(frame) => frame,
                 Err(e) => {
@@ -395,10 +441,18 @@ impl IMDProducer {
                 }
             };
 
-            let full_frame = match &mut self.version_handler {
-                IMDProducerType::V2(v2) => v2.parse_imdframe(&mut self.conn, empty_frame)?,
-                IMDProducerType::V3(v3) => v3.parse_imdframe(&mut self.conn, empty_frame)?,
-            };
+            print!("Got empty frame");
+
+            let full_frame = match self.sinfo.version {
+                2 => self.parse_imdframe_v2(empty_frame),
+                3 => self.parse_imdframe_v3(empty_frame),
+                _ => Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Invalid version",
+                )),
+            }?;
+
+            print!("Parsed a frame");
 
             if let Err(e) = self.full_send.send(full_frame) {
                 return Err(io::Error::new(
@@ -406,16 +460,181 @@ impl IMDProducer {
                     format!("Channel send failed: {e}"),
                 ));
             }
+
+            print!("Pushed a frame");
         }
     }
-}
 
+    fn parse_imdframe_v2(&mut self, empty_frame: IMDFrame) -> io::Result<IMDFrame> {
+        unimplemented!()
+    }
+
+    fn parse_imdframe_v3(&mut self, empty_frame: IMDFrame) -> io::Result<IMDFrame> {
+        let mut full_frame = empty_frame;
+
+        println!("Expecting time...");
+
+        if self.sinfo.time {
+            self.expect(IMDMessageType::Time, Some(1))?;
+            let time = full_frame.time.as_mut().unwrap();
+
+            match self.sinfo.endianness {
+                Endianness::Big => {
+                    time.dt = self.reader.read_f64::<BigEndian>()?;
+                    time.time = self.reader.read_f64::<BigEndian>()?;
+                    time.step = self.reader.read_i64::<BigEndian>()?;
+                }
+                Endianness::Little => {
+                    time.dt = self.reader.read_f64::<LittleEndian>()?;
+                    time.time = self.reader.read_f64::<LittleEndian>()?;
+                    time.step = self.reader.read_i64::<LittleEndian>()?;
+                }
+            }
+
+            println!("Time packet: {:?}", time);
+        }
+
+        if self.sinfo.energies {
+            println!("Got time, expecting energies...");
+            self.expect(IMDMessageType::Energies, Some(1))?;
+            let energies = full_frame.energies.as_mut().unwrap();
+
+            match self.sinfo.endianness {
+                Endianness::Big => {
+                    energies.step = self.reader.read_i32::<BigEndian>()?;
+                    energies.temperature = self.reader.read_f32::<BigEndian>()?;
+                    energies.total = self.reader.read_f32::<BigEndian>()?;
+                    energies.potential = self.reader.read_f32::<BigEndian>()?;
+                    energies.vdw = self.reader.read_f32::<BigEndian>()?;
+                    energies.coulomb = self.reader.read_f32::<BigEndian>()?;
+                    energies.bonds = self.reader.read_f32::<BigEndian>()?;
+                    energies.angles = self.reader.read_f32::<BigEndian>()?;
+                    energies.dihedrals = self.reader.read_f32::<BigEndian>()?;
+                    energies.impropers = self.reader.read_f32::<BigEndian>()?;
+                }
+                Endianness::Little => {
+                    energies.step = self.reader.read_i32::<LittleEndian>()?;
+                    energies.temperature = self.reader.read_f32::<LittleEndian>()?;
+                    energies.total = self.reader.read_f32::<LittleEndian>()?;
+                    energies.potential = self.reader.read_f32::<LittleEndian>()?;
+                    energies.vdw = self.reader.read_f32::<LittleEndian>()?;
+                    energies.coulomb = self.reader.read_f32::<LittleEndian>()?;
+                    energies.bonds = self.reader.read_f32::<LittleEndian>()?;
+                    energies.angles = self.reader.read_f32::<LittleEndian>()?;
+                    energies.dihedrals = self.reader.read_f32::<LittleEndian>()?;
+                    energies.impropers = self.reader.read_f32::<LittleEndian>()?;
+                }
+            }
+            println!("NRG packet: {:?}", energies);
+        }
+
+        println!("Got energies, expecting box..");
+
+        if self.sinfo.box_info {
+            self.expect(IMDMessageType::Box, Some(1))?;
+            Self::read_into_array2(
+                &mut self.reader,
+                &mut full_frame.box_info.as_mut().unwrap(),
+                self.sinfo.endianness,
+            )?;
+        }
+
+        println!("Got box {:?}", full_frame.box_info);
+
+        if self.sinfo.positions {
+            self.expect(IMDMessageType::FCoords, Some(self.n_atoms as i32))?;
+            Self::read_into_array2(
+                &mut self.reader,
+                &mut full_frame.positions.as_mut().unwrap(),
+                self.sinfo.endianness,
+            )?;
+        }
+        if self.sinfo.velocities {
+            self.expect(IMDMessageType::Velocities, Some(self.n_atoms as i32))?;
+            Self::read_into_array2(
+                &mut self.reader,
+                &mut full_frame.velocities.as_mut().unwrap(),
+                self.sinfo.endianness,
+            )?;
+        }
+        if self.sinfo.forces {
+            self.expect(IMDMessageType::Forces, Some(self.n_atoms as i32))?;
+            Self::read_into_array2(
+                &mut self.reader,
+                &mut full_frame.forces.as_mut().unwrap(),
+                self.sinfo.endianness,
+            )?;
+        }
+        Ok(full_frame)
+    }
+
+    fn expect(
+        &mut self,
+        expected_type: IMDMessageType,
+        expected_value: Option<i32>,
+    ) -> io::Result<()> {
+        self.header_buf.refill_from_reader(&mut self.reader)?;
+
+        if self.header_buf.header_type != expected_type {
+            return Err(io::Error::new(
+                ErrorKind::InvalidData,
+                format!(
+                    "Expected header type {:?}, got {:?}",
+                    expected_type, self.header_buf.header_type
+                ),
+            ));
+        }
+
+        if let Some(exp) = expected_value {
+            if self.header_buf.length != exp {
+                return Err(io::Error::new(
+                    ErrorKind::InvalidData,
+                    format!(
+                        "Expected header length {}, got {}",
+                        exp, self.header_buf.length
+                    ),
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn read_into_array2<R: Read>(
+        reader: &mut R,
+        arr: &mut Array2<f32>,
+        endian: Endianness,
+    ) -> std::io::Result<()> {
+        let slice = arr.as_slice_memory_order_mut().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "Array not contiguous")
+        })?;
+
+        let byte_buf = unsafe {
+            std::slice::from_raw_parts_mut(
+                slice.as_mut_ptr() as *mut u8,
+                slice.len() * std::mem::size_of::<f32>(),
+            )
+        };
+
+        reader.read_exact(byte_buf)?;
+
+        if let Endianness::Big = endian {
+            for val in slice.iter_mut() {
+                *val = f32::from_be_bytes(val.to_ne_bytes());
+            }
+        }
+
+        Ok(())
+    }
+}
+#[derive(Debug)]
 pub struct IMDClient {
     sinfo: IMDSessionInfo,
-    producer_handle: thread::JoinHandle<io::Result<()>>,
+    producer_handle: Option<thread::JoinHandle<io::Result<()>>>,
     full_recv: Receiver<IMDFrame>,
     empty_send: Sender<IMDFrame>,
     prev_frame: Option<IMDFrame>,
+    conn: TcpStream,
 }
 
 impl IMDClient {
@@ -431,6 +650,8 @@ impl IMDClient {
 
         let sinfo = Self::await_imd_handshake(&mut conn)?;
 
+        println!("Handshake succeeded");
+
         let max_bytes = match buffer_size {
             Some(size) => size,
             None => 10 * 1024u64.pow(2),
@@ -441,16 +662,36 @@ impl IMDClient {
         let (full_send, full_recv) = unbounded();
         let (empty_send, empty_recv) = unbounded();
 
+        println!("Created channels");
+
         for _ in 0..num_frames {
-            empty_send.send(IMDFrame::new(n_atoms, sinfo));
+            empty_send
+                .send(IMDFrame::new(n_atoms, sinfo))
+                .map_err(|e| io::Error::new(ErrorKind::InvalidData, e))?;
         }
 
+        println!("Loading channels");
+
         let producer_conn = conn.try_clone()?;
+
+        println!("Cloned socket");
+        // println!("Getting a frame {:?}", empty_recv.recv());
 
         let producer_handle =
             Self::start_producer_thread(producer_conn, empty_recv, full_send, sinfo, n_atoms);
 
+        println!("Started producer");
+
         IMDHeader::go().write_to(&mut conn)?;
+
+        println!("Sending go");
+
+        // let duration = Duration::from_secs_f32(5.0);
+        // thread::sleep(duration);
+        // match producer_handle.join() {
+        //     Ok(result) => println!("Thread finished with result: {:?}", result),
+        //     Err(e) => println!("Thread panicked: {:?}", e),
+        // }
 
         Ok(IMDClient {
             sinfo,
@@ -458,6 +699,7 @@ impl IMDClient {
             full_recv,
             empty_send,
             prev_frame: None,
+            conn,
         })
     }
 
@@ -469,8 +711,10 @@ impl IMDClient {
 
         let prev_frame = self.prev_frame.take();
 
-        if prev_frame.is_none() {
-            self.empty_send.send(prev_frame.expect("Error"));
+        if prev_frame.is_some() {
+            self.empty_send
+                .send(prev_frame.expect("Error"))
+                .map_err(|e| io::Error::new(ErrorKind::InvalidData, e))?;
         }
 
         self.prev_frame = Some(new_imdframe);
@@ -484,8 +728,21 @@ impl IMDClient {
         Ok(self.sinfo)
     }
 
-    pub fn stop(&mut self) {
-        unimplemented!()
+    pub fn stop(&mut self) -> io::Result<()> {
+        if let Some(handle) = self.producer_handle.take() {
+            match handle.join() {
+                Ok(inner) => inner,
+                Err(e) => Err(io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Producer thread panicked: {:?}", e),
+                )),
+            }
+        } else {
+            Err(io::Error::new(
+                std::io::ErrorKind::Other,
+                "Producer thread already stopped",
+            ))
+        }
     }
 
     fn await_imd_handshake(conn: &mut TcpStream) -> io::Result<IMDSessionInfo> {
@@ -531,7 +788,9 @@ impl IMDClient {
                     ),
                 ));
             } else {
-                endianness = Some(Endianness::Big);
+                // if we had to swap it for it to make sense, we're reading little
+                // (since we read it as big)
+                endianness = Some(Endianness::Little);
                 version = Some(swapped);
             }
         } else {
@@ -590,11 +849,17 @@ impl IMDClient {
         full_send: Sender<IMDFrame>,
         sinfo: IMDSessionInfo,
         n_atoms: u64,
-    ) -> thread::JoinHandle<Result<(), io::Error>> {
-        thread::spawn(move || -> Result<(), io::Error> {
+    ) -> Option<thread::JoinHandle<Result<(), io::Error>>> {
+        Some(thread::spawn(move || -> Result<(), io::Error> {
             let mut producer = IMDProducer::new(conn, empty_recv, full_send, sinfo, n_atoms)?;
             producer.run()
-        })
+        }))
+    }
+}
+
+impl Drop for IMDClient {
+    fn drop(&mut self) {
+        println!("RustIMDClient dropped (socket likely closing!)");
     }
 }
 
@@ -607,7 +872,7 @@ pub struct IMDServer {
 impl IMDServer {
     pub fn new<A: ToSocketAddrs>(addr: A, blocking: bool) -> io::Result<Self> {
         let listener = TcpListener::bind(addr).unwrap();
-        listener.set_nonblocking(!blocking);
+        listener.set_nonblocking(!blocking)?;
         let port = listener.local_addr().unwrap().port();
 
         Ok(IMDServer {
@@ -648,6 +913,7 @@ mod python_bindings {
     use pyo3::Bound;
 
     #[pyclass]
+    #[derive(Debug)]
     pub struct IMDClient {
         inner: RustIMDClient,
     }
@@ -784,7 +1050,9 @@ mod python_bindings {
         ) -> PyResult<Self> {
             py.allow_threads(|| {
                 let addr = format!("{}:{}", host, port);
-                let client = RustIMDClient::new(addr, n_atoms, buffer_size)?;
+                let client: RustIMDClient = RustIMDClient::new(addr, n_atoms, buffer_size)?;
+                println!("Client created: {:?}", client);
+
                 Ok(IMDClient { inner: client })
             })
         }
@@ -792,13 +1060,18 @@ mod python_bindings {
             this: Bound<'py, Self>,
             py: Python<'py>,
         ) -> PyResult<Bound<'py, PyDict>> {
+            println!("Borrowing client");
             let rust_client = &mut this.borrow_mut().inner;
+
+            println!("Got client, getting frame");
 
             let rust_frame = py
                 .allow_threads(|| rust_client.get_imdframe())
                 .map_err(|e| {
                     PyErr::new::<pyo3::exceptions::PyEOFError, _>(format!("IO error: {}", e))
                 })?;
+
+            println!("{:?}", rust_frame);
 
             let dict = pyo3::types::PyDict::new(py);
 
@@ -843,6 +1116,12 @@ mod python_bindings {
             let sinfo = IMDSessionInfo { inner: rust_sinfo };
 
             Ok(Py::new(py, sinfo)?.into_bound(py))
+        }
+
+        fn stop<'py>(this: Bound<'py, Self>, py: Python<'py>) -> PyResult<()> {
+            this.borrow_mut().inner.stop().map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyEOFError, _>(format!("IO error: {}", e))
+            })
         }
     }
 

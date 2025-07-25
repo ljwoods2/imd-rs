@@ -12,7 +12,7 @@ from MDAnalysisTests.datafiles import (
     COORDINATES_H5MD,
 )
 from quickstream import IMDClient
-
+import imdclient
 from imdclient.IMDClient import imdframe_memsize
 from imdclient.IMDProtocol import IMDHeaderType
 from imdclient.tests.utils import (
@@ -102,15 +102,19 @@ class TestIMDClientV3:
     def test_handshake(self, universe, imdsinfo):
         server = InThreadIMDServer(universe.trajectory)
         server.set_imdsessioninfo(imdsinfo)
+        print(imdsinfo)
         server.handshake_sequence("localhost", first_frame=False)
         client = IMDClient(
             f"localhost",
             server.port,
-            universe.atoms.n_atoms + 1,
+            universe.atoms.n_atoms,
         )
         server.join_accept_thread()
         print(client.get_imdsessioninfo())
-        server.send_frame(0)
+        server.send_frames(0, 5)
+        client.get_imdframe()
+        client.get_imdframe()
+        client.get_imdframe()
 
     def test_traj_unchanged(self, server_client, universe):
         server, client = server_client
