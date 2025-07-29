@@ -1209,10 +1209,8 @@ mod python_bindings {
             Ok(Py::new(py, sinfo)?.into_bound(py))
         }
 
-        fn stop<'py>(this: Bound<'py, Self>, py: Python<'py>) -> PyResult<()> {
-            this.borrow_mut().inner.stop().map_err(|e| {
-                PyErr::new::<pyo3::exceptions::PyEOFError, _>(format!("IO error: {}", e))
-            })
+        fn stop<'py>(this: Bound<'py, Self>, py: Python<'py>) {
+            let _ = this.borrow_mut().inner.stop();
         }
 
         // pub fn __enter__(slf: Py<Self>) -> Py<Self> {
