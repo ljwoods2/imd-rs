@@ -87,10 +87,9 @@ impl IMDHeader {
     }
 
     fn from_reader(reader: &mut impl ReadBytesExt) -> io::Result<Self> {
-        println!("Reading header type val");
+
         let header_type_val = reader.read_i32::<BigEndian>()?;
 
-        println!("Reading length");
         let length = reader.read_i32::<BigEndian>()?;
 
         let header_type = IMDMessageType::try_from(header_type_val)
@@ -108,8 +107,8 @@ impl IMDHeader {
 
         self.length = reader.read_i32::<BigEndian>()?;
 
-        println!("{:?}", self.header_type);
-        println!("{:?}", self.length);
+        debug!("{:?}", self.header_type);
+        debug!("{:?}", self.length);
 
         Ok(())
     }
@@ -440,7 +439,7 @@ impl IMDProducer {
     }
 
     pub fn run(&mut self) -> io::Result<()> {
-        println!("I'm the producer and I'm starting");
+        debug!("I'm the producer and I'm starting");
         loop {
 
             if self.paused {
@@ -520,7 +519,7 @@ impl IMDProducer {
     fn parse_imdframe_v3(&mut self, empty_frame: IMDFrame) -> io::Result<IMDFrame> {
         let mut full_frame = empty_frame;
 
-        println!("Expecting time...");
+        debug!("Expecting time...");
 
         if self.sinfo.time {
             self.expect(IMDMessageType::Time, Some(1))?;
@@ -539,11 +538,11 @@ impl IMDProducer {
                 }
             }
 
-            println!("Time packet: {:?}", time);
+            debug!("Time packet: {:?}", time);
         }
 
         if self.sinfo.energies {
-            println!("Got time, expecting energies...");
+            debug!("Got time, expecting energies...");
             self.expect(IMDMessageType::Energies, Some(1))?;
             let energies = full_frame.energies.as_mut().unwrap();
 
@@ -573,10 +572,10 @@ impl IMDProducer {
                     energies.impropers = self.reader.read_f32::<LittleEndian>()?;
                 }
             }
-            println!("NRG packet: {:?}", energies);
+            debug!("NRG packet: {:?}", energies);
         }
 
-        println!("Got energies, expecting box..");
+        debug!("Got energies, expecting box..");
 
         if self.sinfo.box_info {
             self.expect(IMDMessageType::Box, Some(1))?;
@@ -587,7 +586,7 @@ impl IMDProducer {
             )?;
         }
 
-        println!("Got box {:?}", full_frame.box_info);
+        debug!("Got box {:?}", full_frame.box_info);
 
         if self.sinfo.positions {
             self.expect(IMDMessageType::FCoords, Some(self.n_atoms as i32))?;
@@ -694,14 +693,14 @@ impl IMDClient {
     ) -> io::Result<Self> {
         let pause_proportion = 0.9;
 
-        println!("Connecting!");
+        debug!("Connecting!");
         let mut conn = TcpStream::connect(&addr)?;
 
-        println!("Connected, waiting for handshake!");
+        debug!("Connected, waiting for handshake!");
 
         let sinfo = Self::await_imd_handshake(&mut conn)?;
 
-        println!("Handshake succeeded");
+        debug!("Handshake succeeded");
 
         let max_bytes = match buffer_size {
             Some(size) => size,
@@ -714,7 +713,7 @@ impl IMDClient {
         let (empty_send, empty_recv) = unbounded::<IMDFrame>();
         let (error_send, error_recv) = unbounded::<io::Error>();
 
-        println!("Created channels");
+        debug!("Created channels");
 
         for _ in 0..num_frames {
             empty_send
@@ -722,12 +721,12 @@ impl IMDClient {
                 .map_err(|e| io::Error::new(ErrorKind::InvalidData, e))?;
         }
 
-        println!("Loading channels");
+        debug!("Loading channels");
 
         let producer_conn = conn.try_clone()?;
 
-        println!("Cloned socket");
-        // println!("Getting a frame {:?}", empty_recv.recv());
+        debug!("Cloned socket");
+        // debug!("Getting a frame {:?}", empty_recv.recv());
 
         let producer_handle = Self::start_producer_thread(
             producer_conn,
@@ -739,17 +738,17 @@ impl IMDClient {
             n_atoms,
         );
 
-        println!("Started producer");
+        debug!("Started producer");
 
         IMDHeader::go().write_to(&mut conn)?;
 
-        println!("Sending go");
+        debug!("Sending go");
 
         // let duration = Duration::from_secs_f32(5.0);
         // thread::sleep(duration);
         // match producer_handle.join() {
-        //     Ok(result) => println!("Thread finished with result: {:?}", result),
-        //     Err(e) => println!("Thread panicked: {:?}", e),
+        //     Ok(result) => debug!("Thread finished with result: {:?}", result),
+        //     Err(e) => debug!("Thread panicked: {:?}", e),
         // }
 
         Ok(IMDClient {
@@ -826,7 +825,7 @@ impl IMDClient {
 
         print!("Got header!");
 
-        println!("{:?}", header);
+        debug!("{:?}", header);
 
         if header.header_type != IMDMessageType::Handshake {
             return Err(io::Error::new(
@@ -925,7 +924,7 @@ impl IMDClient {
 
 impl Drop for IMDClient {
     fn drop(&mut self) {
-        println!("RustIMDClient dropped (socket likely closing!)");
+        debug!("RustIMDClient dropped (socket likely closing!)");
     }
 }
 
@@ -970,6 +969,7 @@ mod python_bindings {
     use super::IMDClient as RustIMDClient;
     use super::IMDFrame as RustIMDFrame;
     use super::IMDSessionInfo as RustIMDSessionInfo;
+    use log::debug;
     use ndarray::ArrayView2;
     use numpy::PyArray2;
     use numpy::ToPyArray;
@@ -1161,7 +1161,7 @@ mod python_bindings {
             py.allow_threads(|| {
                 let addr = format!("{}:{}", host, port);
                 let client: RustIMDClient = RustIMDClient::new(addr, n_atoms, buffer_size)?;
-                println!("Client created: {:?}", client);
+                debug!("Client created: {:?}", client);
 
                 Ok(IMDClient { inner: client })
             })
@@ -1170,10 +1170,10 @@ mod python_bindings {
             this: Bound<'py, Self>,
             py: Python<'py>,
         ) -> PyResult<Bound<'py, IMDFrame>> {
-            println!("Borrowing client");
+            debug!("Borrowing client");
             let rust_client = &mut this.borrow_mut().inner;
 
-            println!("Got client, getting frame");
+            debug!("Got client, getting frame");
 
             let rust_frame = py
                 .allow_threads(|| rust_client.get_imdframe())
@@ -1181,7 +1181,7 @@ mod python_bindings {
                     PyErr::new::<pyo3::exceptions::PyEOFError, _>(format!("IO error: {}", e))
                 })?;
 
-            println!("{:?}", rust_frame);
+            debug!("{:?}", rust_frame);
 
             let anchor = this.into_any();
 
@@ -1242,7 +1242,7 @@ mod python_bindings {
 //             let length = i32::from_be_bytes([buf[4], buf[5], buf[6], buf[7]]);
 //         }
 //         Err(e) => {
-//             eprintln!("Error reading from stream: {}", e);
+//             edebug!("Error reading from stream: {}", e);
 //         }
 //     }
 //     1;
@@ -1261,7 +1261,7 @@ mod python_bindings {
 //             let length = i32::from_be_bytes([buf[4], buf[5], buf[6], buf[7]]);
 //         }
 //         Err(e) => {
-//             eprintln!("Error reading from stream: {}", e);
+//             edebug!("Error reading from stream: {}", e);
 //         }
 //     }
 
