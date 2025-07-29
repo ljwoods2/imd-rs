@@ -1214,6 +1214,10 @@ mod python_bindings {
                 PyErr::new::<pyo3::exceptions::PyEOFError, _>(format!("IO error: {}", e))
             })
         }
+
+        // pub fn __enter__(slf: Py<Self>) -> Py<Self> {
+        //     slf
+        // }
     }
 
     #[pymodule]
