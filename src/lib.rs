@@ -133,6 +133,12 @@ impl IMDHeader {
     pub fn disconnect() -> Self {
         Self::new(IMDMessageType::Disconnect, 0)
     }
+    pub fn pause() -> Self {
+        Self::new(IMDMessageType::Pause, 0)
+    }
+    pub fn resume() -> Self {
+        Self::new(IMDMessageType::Resume, 0)
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -366,15 +372,16 @@ struct IMDProducer {
     reader: BufReader<TcpStream>,
     empty_recv: Receiver<IMDFrame>,
     full_send: Sender<IMDFrame>,
+    num_frames: u64,
     error_send: Sender<io::Error>,
     sinfo: IMDSessionInfo,
     n_atoms: u64,
     paused: bool,
     header_buf: IMDHeader,
-    time_buf: Option<[u8; 24]>,
-    energy_buf: Option<[u8; 40]>,
-    xvf_buf: Option<Vec<u8>>,
-    box_buf: Option<[u8; 36]>,
+    // time_buf: Option<[u8; 24]>,
+    // energy_buf: Option<[u8; 40]>,
+    // xvf_buf: Option<Vec<u8>>,
+    // box_buf: Option<[u8; 36]>,
 }
 
 impl IMDProducer {
@@ -382,6 +389,7 @@ impl IMDProducer {
         conn: TcpStream,
         empty_recv: Receiver<IMDFrame>,
         full_send: Sender<IMDFrame>,
+        num_frames: u64,
         error_send: Sender<io::Error>,
         sinfo: IMDSessionInfo,
         n_atoms: u64,
@@ -401,7 +409,7 @@ impl IMDProducer {
         };
 
         let box_buf: Option<[u8; 36]> = match sinfo.box_info {
-            // 4 bytes * 9
+            // 4 bytes * 9``
             true => Some([0u8; 36]),
             false => None,
         };
@@ -418,25 +426,45 @@ impl IMDProducer {
             reader,
             empty_recv,
             full_send,
+            num_frames,
             error_send,
             sinfo,
             n_atoms,
             paused: false,
             header_buf,
-            time_buf,
-            energy_buf,
-            xvf_buf,
-            box_buf,
+            // time_buf,
+            // energy_buf,
+            // xvf_buf,
+            // box_buf,
         })
     }
 
     pub fn run(&mut self) -> io::Result<()> {
         println!("I'm the producer and I'm starting");
         loop {
+
+            if self.paused {
+                if self.empty_recv.len() as f64 <= 0.5 * self.num_frames as f64 {
+                    IMDHeader::resume().write_to(&mut self.conn)?;
+                    self.paused = false;
+                }
+            }
+            else {
+                // arbitrarily
+                // if <25% of frames are empty
+                // the consumer is working too slow for the simulation
+                // so pause it
+                if self.empty_recv.len() as f64 >= 0.25 * self.num_frames as f64 {
+                    IMDHeader::pause().write_to(&mut self.conn)?;
+                    self.paused = true;
+                }
+            }
+
             print!("starting loop");
             let empty_frame = match self.empty_recv.recv() {
                 Ok(frame) => frame,
                 Err(e) => {
+                    let _ = IMDHeader::disconnect().write_to(&mut self.conn);
                     let err_msg = format!("Channel recv failed: {e}");
                     let err = io::Error::new(ErrorKind::Other, err_msg.clone());
                     let _ = self
@@ -460,6 +488,7 @@ impl IMDProducer {
             let full_frame = match full_frame {
                 Ok(f) => f,
                 Err(e) => {
+                    let _ = IMDHeader::disconnect().write_to(&mut self.conn);
                     let err_msg = format!("{e}");
                     let _ = self
                         .error_send
@@ -471,6 +500,7 @@ impl IMDProducer {
             print!("Parsed a frame");
 
             if let Err(e) = self.full_send.send(full_frame) {
+                let _ = IMDHeader::disconnect().write_to(&mut self.conn);
                 let err_msg = format!("Channel send failed: {e}");
                 let err = io::Error::new(ErrorKind::ConnectionAborted, err_msg.clone());
                 let _ = self
@@ -662,6 +692,8 @@ impl IMDClient {
         n_atoms: u64,
         buffer_size: Option<u64>,
     ) -> io::Result<Self> {
+        let pause_proportion = 0.9;
+
         println!("Connecting!");
         let mut conn = TcpStream::connect(&addr)?;
 
@@ -701,6 +733,7 @@ impl IMDClient {
             producer_conn,
             empty_recv,
             full_send,
+            num_frames,
             error_send,
             sinfo,
             n_atoms,
@@ -756,6 +789,9 @@ impl IMDClient {
     }
 
     pub fn stop(&mut self) -> io::Result<()> {
+        // best effort disconnect
+        let _ = IMDHeader::disconnect().write_to(&mut self.conn);
+
         if let Some(handle) = self.producer_handle.take() {
             match handle.join() {
                 Ok(inner) => inner,
@@ -874,13 +910,14 @@ impl IMDClient {
         conn: TcpStream,
         empty_recv: Receiver<IMDFrame>,
         full_send: Sender<IMDFrame>,
+        num_frames: u64,
         error_send: Sender<io::Error>,
         sinfo: IMDSessionInfo,
         n_atoms: u64,
     ) -> Option<thread::JoinHandle<Result<(), io::Error>>> {
         Some(thread::spawn(move || -> Result<(), io::Error> {
             let mut producer =
-                IMDProducer::new(conn, empty_recv, full_send, error_send, sinfo, n_atoms)?;
+                IMDProducer::new(conn, empty_recv, full_send, num_frames, error_send, sinfo, n_atoms)?;
             producer.run()
         }))
     }
@@ -1146,7 +1183,6 @@ mod python_bindings {
 
             println!("{:?}", rust_frame);
 
-            // let dict = pyo3::types::PyDict::new(py);
             let anchor = this.into_any();
 
             let imd_frame = IMDFrame::from_rust(py, &rust_frame, anchor)?;
@@ -1154,52 +1190,6 @@ mod python_bindings {
             let py_frame = Py::new(py, imd_frame)?;
 
             Ok(py_frame.into_bound(py))
-            // let dict = pyo3::types::PyDict::new(py);
-
-            // if let Some(p) = &rust_frame.positions {
-            //     let pyarray = unsafe { PyArray2::borrow_from_array(p, anchor.clone()) };
-            //     let py_owned: Py<PyArray2<f32>> = pyarray.into();
-            //     dict.set_item("positions", pyarray)?;
-            // }
-
-            // if let Some(v) = &rust_frame.velocities {
-            //     let pyarray = unsafe { PyArray2::borrow_from_array(v, anchor.clone()) };
-            //     dict.set_item("velocities", pyarray)?;
-            // }
-
-            // if let Some(f) = &rust_frame.forces {
-            //     let pyarray = unsafe { PyArray2::borrow_from_array(f, anchor.clone()) };
-            //     dict.set_item("forces", pyarray)?;
-            // }
-
-            // let frame = IMDFrame {
-            //     dict: dict.unbind(),
-            // };
-
-            // Ok(Py::new(py, frame)?.into_bound(py))
-
-            // let positions = match &rust_frame.positions {
-            //     Some(p) => Some(unsafe { PyArray2::borrow_from_array(p, anchor.clone()) }),
-            //     None => None,
-            // };
-
-            // dict.set_item("positions", positions)?;
-
-            // let velocities = match &rust_frame.velocities {
-            //     Some(p) => Some(unsafe { PyArray2::borrow_from_array(p, anchor.clone()) }),
-            //     None => None,
-            // };
-
-            // dict.set_item("velocties", velocities)?;
-
-            // let forces = match &rust_frame.forces {
-            //     Some(p) => Some(unsafe { PyArray2::borrow_from_array(p, anchor.clone()) }),
-            //     None => None,
-            // };
-
-            // dict.set_item("forces", forces)?;
-
-            // Ok(dict)
         }
 
         fn get_imdsessioninfo<'py>(

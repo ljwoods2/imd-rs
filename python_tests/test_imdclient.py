@@ -98,24 +98,7 @@ class TestIMDClientV3:
         yield server, client
         client.stop()
         server.cleanup()
-
-    def test_handshake(self, universe, imdsinfo):
-        server = InThreadIMDServer(universe.trajectory)
-        server.set_imdsessioninfo(imdsinfo)
-        print(imdsinfo)
-        server.handshake_sequence("localhost", first_frame=False)
-        client = IMDClient(
-            f"localhost",
-            server.port,
-            universe.atoms.n_atoms,
-        )
-        server.join_accept_thread()
-        print(client.get_imdsessioninfo())
-        server.send_frames(0, 5)
-        client.get_imdframe()
-        client.get_imdframe()
-        client.get_imdframe()
-
+        
     def test_traj_unchanged(self, server_client, universe):
         server, client = server_client
         server.send_frames(0, 5)
