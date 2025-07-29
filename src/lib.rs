@@ -366,6 +366,7 @@ struct IMDProducer {
     reader: BufReader<TcpStream>,
     empty_recv: Receiver<IMDFrame>,
     full_send: Sender<IMDFrame>,
+    error_send: Sender<io::Error>,
     sinfo: IMDSessionInfo,
     n_atoms: u64,
     paused: bool,
@@ -381,6 +382,7 @@ impl IMDProducer {
         conn: TcpStream,
         empty_recv: Receiver<IMDFrame>,
         full_send: Sender<IMDFrame>,
+        error_send: Sender<io::Error>,
         sinfo: IMDSessionInfo,
         n_atoms: u64,
     ) -> io::Result<Self> {
@@ -416,6 +418,7 @@ impl IMDProducer {
             reader,
             empty_recv,
             full_send,
+            error_send,
             sinfo,
             n_atoms,
             paused: false,
@@ -434,10 +437,12 @@ impl IMDProducer {
             let empty_frame = match self.empty_recv.recv() {
                 Ok(frame) => frame,
                 Err(e) => {
-                    return Err(io::Error::new(
-                        ErrorKind::ConnectionAborted,
-                        format!("Channel recv failed: {e}"),
-                    ));
+                    let err_msg = format!("Channel recv failed: {e}");
+                    let err = io::Error::new(ErrorKind::Other, err_msg.clone());
+                    let _ = self
+                        .error_send
+                        .send(io::Error::new(ErrorKind::Other, err_msg));
+                    return Err(err);
                 }
             };
 
@@ -450,15 +455,28 @@ impl IMDProducer {
                     io::ErrorKind::InvalidData,
                     "Invalid version",
                 )),
-            }?;
+            };
+
+            let full_frame = match full_frame {
+                Ok(f) => f,
+                Err(e) => {
+                    let err_msg = format!("{e}");
+                    let _ = self
+                        .error_send
+                        .send(io::Error::new(ErrorKind::Other, err_msg.clone()));
+                    return Err(io::Error::new(ErrorKind::Other, err_msg));
+                }
+            };
 
             print!("Parsed a frame");
 
             if let Err(e) = self.full_send.send(full_frame) {
-                return Err(io::Error::new(
-                    ErrorKind::ConnectionAborted,
-                    format!("Channel send failed: {e}"),
-                ));
+                let err_msg = format!("Channel send failed: {e}");
+                let err = io::Error::new(ErrorKind::ConnectionAborted, err_msg.clone());
+                let _ = self
+                    .error_send
+                    .send(io::Error::new(ErrorKind::Other, err_msg));
+                return Err(err);
             }
 
             print!("Pushed a frame");
@@ -633,6 +651,7 @@ pub struct IMDClient {
     producer_handle: Option<thread::JoinHandle<io::Result<()>>>,
     full_recv: Receiver<IMDFrame>,
     empty_send: Sender<IMDFrame>,
+    error_recv: Receiver<io::Error>,
     prev_frame: Option<IMDFrame>,
     conn: TcpStream,
 }
@@ -659,8 +678,9 @@ impl IMDClient {
         let frame_bytes = sinfo.frame_size_bytes(n_atoms);
         let num_frames = max_bytes / frame_bytes;
 
-        let (full_send, full_recv) = unbounded();
-        let (empty_send, empty_recv) = unbounded();
+        let (full_send, full_recv) = unbounded::<IMDFrame>();
+        let (empty_send, empty_recv) = unbounded::<IMDFrame>();
+        let (error_send, error_recv) = unbounded::<io::Error>();
 
         println!("Created channels");
 
@@ -677,8 +697,14 @@ impl IMDClient {
         println!("Cloned socket");
         // println!("Getting a frame {:?}", empty_recv.recv());
 
-        let producer_handle =
-            Self::start_producer_thread(producer_conn, empty_recv, full_send, sinfo, n_atoms);
+        let producer_handle = Self::start_producer_thread(
+            producer_conn,
+            empty_recv,
+            full_send,
+            error_send,
+            sinfo,
+            n_atoms,
+        );
 
         println!("Started producer");
 
@@ -698,6 +724,7 @@ impl IMDClient {
             producer_handle,
             full_recv,
             empty_send,
+            error_recv,
             prev_frame: None,
             conn,
         })
@@ -847,11 +874,13 @@ impl IMDClient {
         conn: TcpStream,
         empty_recv: Receiver<IMDFrame>,
         full_send: Sender<IMDFrame>,
+        error_send: Sender<io::Error>,
         sinfo: IMDSessionInfo,
         n_atoms: u64,
     ) -> Option<thread::JoinHandle<Result<(), io::Error>>> {
         Some(thread::spawn(move || -> Result<(), io::Error> {
-            let mut producer = IMDProducer::new(conn, empty_recv, full_send, sinfo, n_atoms)?;
+            let mut producer =
+                IMDProducer::new(conn, empty_recv, full_send, error_send, sinfo, n_atoms)?;
             producer.run()
         }))
     }
@@ -907,7 +936,6 @@ mod python_bindings {
     use ndarray::ArrayView2;
     use numpy::PyArray2;
     use numpy::ToPyArray;
-    use pyo3::ffi::getter;
     use pyo3::prelude::*;
     use pyo3::types::PyDict;
     use pyo3::Bound;
@@ -917,69 +945,84 @@ mod python_bindings {
     pub struct IMDClient {
         inner: RustIMDClient,
     }
+    #[pyclass]
+    pub struct IMDFrame {
+        #[pyo3(get)]
+        step: Option<i64>,
+        #[pyo3(get)]
+        dt: Option<f64>,
+        #[pyo3(get)]
+        time: Option<f64>,
+        #[pyo3(get)]
+        energies: Option<Py<PyDict>>,
+        #[pyo3(get)]
+        positions: Option<Py<PyArray2<f32>>>,
+        #[pyo3(get)]
+        velocities: Option<Py<PyArray2<f32>>>,
+        #[pyo3(get)]
+        forces: Option<Py<PyArray2<f32>>>,
+        #[pyo3(get)]
+        r#box: Option<Py<PyArray2<f32>>>,
+    }
 
-    // #[pyclass]
-    // pub struct IMDFrame {
-    //     positions: Py<PyArray2<f32>>,
-    // }
+    impl IMDFrame {
+        pub fn from_rust<'py>(
+            py: Python<'py>,
+            rust_frame: &RustIMDFrame,
+            anchor: Bound<'py, PyAny>,
+        ) -> PyResult<Self> {
+            let (step, dt, time) = match &rust_frame.time {
+                Some(t) => (Some(t.step), Some(t.dt), Some(t.time)),
+                None => (None, None, None),
+            };
 
-    // #[pymethods]
-    // impl IMDFrame {
-    //     #[getter]
-    //     fn positions<'py>(
-    //         this: Bound<'py, Self>,
-    //         py: Python<'py>,
-    //     ) -> PyResult<Bound<'py, PyArray2<f32>>> {
-    //         let array = this.borrow().positions.as_ref(py);
-    //         Ok(array.bind(py))
-    //     }
-    // }
+            let energies = rust_frame.energies.map(|e| {
+                let dict = PyDict::new(py);
+                dict.set_item("step", e.step).unwrap();
+                dict.set_item("temperature", e.temperature).unwrap();
+                dict.set_item("total", e.total).unwrap();
+                dict.set_item("potential", e.potential).unwrap();
+                dict.set_item("vdw", e.vdw).unwrap();
+                dict.set_item("coulomb", e.coulomb).unwrap();
+                dict.set_item("bonds", e.bonds).unwrap();
+                dict.set_item("angles", e.angles).unwrap();
+                dict.set_item("dihedrals", e.dihedrals).unwrap();
+                dict.set_item("impropers", e.impropers).unwrap();
+                dict.into()
+            });
 
-    // #[pymethods]
-    // impl IMDFrame {
-    //     #[getter]
-    //     fn positions<'py>(&self, py: Python<'py>) -> PyResult<Option<&'py PyArray2<f32>>> {
-    //         match &self.positions_view {
-    //             Some(view) => Ok(Some(view.to_pyarray(py))),
-    //             None => Ok(None),
-    //         }
-    //     }
+            let positions = match &rust_frame.positions {
+                Some(p) => Some(unsafe { PyArray2::borrow_from_array(p, anchor.clone()).into() }),
+                None => None,
+            };
 
-    //     #[getter]
-    //     fn velocities<'py>(&self, py: Python<'py>) -> PyResult<Option<&'py PyArray2<f32>>> {
-    //         match &self.velocities_view {
-    //             Some(view) => Ok(Some(view.to_pyarray(py))),
-    //             None => Ok(None),
-    //         }
-    //     }
+            let velocities = match &rust_frame.velocities {
+                Some(v) => Some(unsafe { PyArray2::borrow_from_array(v, anchor.clone()).into() }),
+                None => None,
+            };
 
-    //     #[getter]
-    //     fn forces<'py>(&self, py: Python<'py>) -> PyResult<Option<&'py PyArray2<f32>>> {
-    //         match &self.forces_view {
-    //             Some(view) => Ok(Some(view.to_pyarray(py))),
-    //             None => Ok(None),
-    //         }
-    //     }
+            let forces = match &rust_frame.forces {
+                Some(f) => Some(unsafe { PyArray2::borrow_from_array(f, anchor.clone()).into() }),
+                None => None,
+            };
 
-    //     #[getter]
-    //     fn box_info<'py>(&self, py: Python<'py>) -> PyResult<Option<&'py PyArray2<f32>>> {
-    //         match &self.box_info_view {
-    //             Some(view) => Ok(Some(view.to_pyarray(py))),
-    //             None => Ok(None),
-    //         }
-    //     }
+            let r#box = match &rust_frame.box_info {
+                Some(f) => Some(unsafe { PyArray2::borrow_from_array(f, anchor.clone()).into() }),
+                None => None,
+            };
 
-    //     #[getter]
-    //     fn time(&self) -> Option<(i32, f64, f64)> {
-    //         self.time
-    //     }
-
-    //     #[getter]
-    //     fn energies(&self) -> Option<(i32, f32, f32, f32, f32, f32, f32, f32, f32, f32)> {
-    //         self.energies
-    //     }
-    // }
-
+            Ok(Self {
+                step,
+                dt,
+                time,
+                energies,
+                positions,
+                velocities,
+                forces,
+                r#box,
+            })
+        }
+    }
     #[pyclass]
     pub struct IMDSessionInfo {
         inner: RustIMDSessionInfo,
@@ -1036,6 +1079,36 @@ mod python_bindings {
         }
     }
 
+    // pub fn make_imdframe_pyclass<'py>(
+    //     py: Python<'py>,
+    //     anchor: Bound<'py, PyAny>,
+    //     rust_frame: &RustIMDFrame,
+    // ) -> PyResult<Bound<'py, IMDFrame>> {
+    //     let dict = pyo3::types::PyDict::new(py);
+
+    //     if let Some(p) = &rust_frame.positions {
+    //         let pyarray = unsafe { PyArray2::borrow_from_array(p, anchor.clone()) };
+    //         dict.set_item("positions", pyarray)?;
+    //     }
+
+    //     if let Some(v) = &rust_frame.velocities {
+    //         let pyarray = unsafe { PyArray2::borrow_from_array(v, anchor.clone()) };
+    //         dict.set_item("velocities", pyarray)?;
+    //     }
+
+    //     if let Some(f) = &rust_frame.forces {
+    //         let pyarray: Bound<'_, numpy::PyArray<f32, ndarray::Dim<[usize; 2]>>> =
+    //             unsafe { PyArray2::borrow_from_array(f, anchor.clone()) };
+    //         dict.set_item("forces", pyarray)?;
+    //     }
+
+    //     let frame = IMDFrame {
+    //         dict: dict.unbind(),
+    //     };
+
+    //     Ok(Py::new(py, frame)?.into_bound(py))
+    // }
+
     #[pymethods]
     impl IMDClient {
         #[new]
@@ -1059,7 +1132,7 @@ mod python_bindings {
         fn get_imdframe<'py>(
             this: Bound<'py, Self>,
             py: Python<'py>,
-        ) -> PyResult<Bound<'py, PyDict>> {
+        ) -> PyResult<Bound<'py, IMDFrame>> {
             println!("Borrowing client");
             let rust_client = &mut this.borrow_mut().inner;
 
@@ -1073,32 +1146,60 @@ mod python_bindings {
 
             println!("{:?}", rust_frame);
 
-            let dict = pyo3::types::PyDict::new(py);
-
+            // let dict = pyo3::types::PyDict::new(py);
             let anchor = this.into_any();
 
-            let positions = match &rust_frame.positions {
-                Some(p) => Some(unsafe { PyArray2::borrow_from_array(p, anchor.clone()) }),
-                None => None,
-            };
+            let imd_frame = IMDFrame::from_rust(py, &rust_frame, anchor)?;
 
-            dict.set_item("positions", positions)?;
+            let py_frame = Py::new(py, imd_frame)?;
 
-            let velocities = match &rust_frame.velocities {
-                Some(p) => Some(unsafe { PyArray2::borrow_from_array(p, anchor.clone()) }),
-                None => None,
-            };
+            Ok(py_frame.into_bound(py))
+            // let dict = pyo3::types::PyDict::new(py);
 
-            dict.set_item("velocties", velocities)?;
+            // if let Some(p) = &rust_frame.positions {
+            //     let pyarray = unsafe { PyArray2::borrow_from_array(p, anchor.clone()) };
+            //     let py_owned: Py<PyArray2<f32>> = pyarray.into();
+            //     dict.set_item("positions", pyarray)?;
+            // }
 
-            let forces = match &rust_frame.forces {
-                Some(p) => Some(unsafe { PyArray2::borrow_from_array(p, anchor.clone()) }),
-                None => None,
-            };
+            // if let Some(v) = &rust_frame.velocities {
+            //     let pyarray = unsafe { PyArray2::borrow_from_array(v, anchor.clone()) };
+            //     dict.set_item("velocities", pyarray)?;
+            // }
 
-            dict.set_item("forces", forces)?;
+            // if let Some(f) = &rust_frame.forces {
+            //     let pyarray = unsafe { PyArray2::borrow_from_array(f, anchor.clone()) };
+            //     dict.set_item("forces", pyarray)?;
+            // }
 
-            Ok(dict)
+            // let frame = IMDFrame {
+            //     dict: dict.unbind(),
+            // };
+
+            // Ok(Py::new(py, frame)?.into_bound(py))
+
+            // let positions = match &rust_frame.positions {
+            //     Some(p) => Some(unsafe { PyArray2::borrow_from_array(p, anchor.clone()) }),
+            //     None => None,
+            // };
+
+            // dict.set_item("positions", positions)?;
+
+            // let velocities = match &rust_frame.velocities {
+            //     Some(p) => Some(unsafe { PyArray2::borrow_from_array(p, anchor.clone()) }),
+            //     None => None,
+            // };
+
+            // dict.set_item("velocties", velocities)?;
+
+            // let forces = match &rust_frame.forces {
+            //     Some(p) => Some(unsafe { PyArray2::borrow_from_array(p, anchor.clone()) }),
+            //     None => None,
+            // };
+
+            // dict.set_item("forces", forces)?;
+
+            // Ok(dict)
         }
 
         fn get_imdsessioninfo<'py>(
