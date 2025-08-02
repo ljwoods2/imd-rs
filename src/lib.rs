@@ -1155,7 +1155,7 @@ mod python_bindings {
             })
         }
     }
-    #[pyclass]
+    #[pyclass(dict)]
     pub struct IMDSessionInfo {
         inner: RustIMDSessionInfo,
     }
