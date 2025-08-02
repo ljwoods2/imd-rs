@@ -111,9 +111,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # - name: namd
-          #   image: ghcr.io/becksteinlab/streaming-namd-docker:main-common-cpu
-          #   script: imdclient/tests/test_namd.py
+          - name: namd
+            image: ghcr.io/becksteinlab/streaming-namd-docker:main-common-cpu
+            script: imdclient/tests/test_namd.py
           - name: gromacs
             image: ghcr.io/becksteinlab/streaming-md-docker:main-common-cpu
             script: python_tests/test_gromacs.py
@@ -144,10 +144,10 @@ jobs:
       - name: Install conda dependencies
         uses: conda-incubator/setup-miniconda@v2
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.11"
           environment-file: devtools/conda-envs/test_env.yaml
           add-pip-as-python-dependency: true
-          architecture: ${{ env.ARCHITECTURE }}
+          architecture: x64
 
           channels: conda-forge, defaults
 
