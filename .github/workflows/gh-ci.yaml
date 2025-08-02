@@ -105,7 +105,6 @@ jobs:
         verbose: True
 
   simulation_engine_tests:
-    if: github.repository == 'Becksteinlab/imdclient'
     runs-on: ubuntu-latest
 
     strategy:
