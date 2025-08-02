@@ -113,7 +113,7 @@ jobs:
         include:
           - name: namd
             image: ghcr.io/becksteinlab/streaming-namd-docker:main-common-cpu
-            script: imdclient/tests/test_namd.py
+            script: python_tests/test_namd.py
           - name: gromacs
             image: ghcr.io/becksteinlab/streaming-md-docker:main-common-cpu
             script: python_tests/test_gromacs.py
