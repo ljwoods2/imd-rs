@@ -1318,12 +1318,7 @@ mod python_bindings {
 
     #[pymodule]
     fn quickstream(m: &Bound<'_, PyModule>) -> PyResult<()> {
-        static INIT_LOGGER: Once = Once::new();
-
-        INIT_LOGGER.call_once(|| {
-            env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug"))
-                .init();
-        });
+        pyo3_log::init();
         m.add_class::<IMDClient>()?;
         // m.add_class::<IMDFrame>()?;
         m.add_class::<IMDSessionInfo>()?;

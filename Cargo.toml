@@ -22,3 +22,4 @@ crossbeam-channel = "0.5"
 ndarray = { version = "0.16" }
 ctrlc = { version ="3.4", features = ["termination"] }
 env_logger = { version = "0.11"}
+pyo3-log = { version = "0.9" }
