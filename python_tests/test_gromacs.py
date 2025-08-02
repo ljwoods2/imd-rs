@@ -4,7 +4,7 @@ import re
 
 import pytest
 
-from imdclient.tests.base import IMDv3IntegrationTest
+from .base import IMDv3IntegrationTest
 from imdclient.tests.datafiles import (
     GROMACS_GRO,
     GROMACS_TOP,
@@ -12,12 +12,12 @@ from imdclient.tests.datafiles import (
     GROMACS_MDP_NST_8,
 )
 
-logger = logging.getLogger("imdclient.IMDClient")
-file_handler = logging.FileHandler("gromacs_test.log")
-formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-file_handler.setFormatter(formatter)
-logger.addHandler(file_handler)
-logger.setLevel(logging.DEBUG)
+# logger = logging.getLogger("imdclient.IMDClient")
+# file_handler = logging.FileHandler("gromacs_test.log")
+# formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+# file_handler.setFormatter(formatter)
+# logger.addHandler(file_handler)
+# logger.setLevel(logging.DEBUG)
 
 
 class TestIMDv3Gromacs(IMDv3IntegrationTest):

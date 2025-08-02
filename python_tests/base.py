@@ -12,8 +12,6 @@ import MDAnalysis as mda
 
 from imdclient.utils import get_free_port
 
-logger = logging.getLogger("imdclient.IMDClient")
-
 import logging
 import copy
 
@@ -22,7 +20,7 @@ from MDAnalysis.coordinates import core
 from quickstream import IMDClient
 from imdclient.utils import parse_host_port
 
-logger = logging.getLogger("imdclient.IMDClient")
+# logger = logging.getLogger("imdclient.IMDClient")
 
 
 class MinimalReader:

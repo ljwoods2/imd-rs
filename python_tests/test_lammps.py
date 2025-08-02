@@ -5,15 +5,15 @@ import re
 import pytest
 import MDAnalysis as mda
 
-from imdclient.tests.base import IMDv3IntegrationTest, MinimalReader
+from .base import IMDv3IntegrationTest, MinimalReader
 from imdclient.tests.datafiles import LAMMPS_TOPOL, LAMMPS_IN_NST_1, LAMMPS_IN_NST_8
 
-logger = logging.getLogger("imdclient.IMDClient")
-file_handler = logging.FileHandler("lammps_test.log")
-formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-file_handler.setFormatter(formatter)
-logger.addHandler(file_handler)
-logger.setLevel(logging.DEBUG)
+# logger = logging.getLogger("imdclient.IMDClient")
+# file_handler = logging.FileHandler("lammps_test.log")
+# formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+# file_handler.setFormatter(formatter)
+# logger.addHandler(file_handler)
+# logger.setLevel(logging.DEBUG)
 
 
 class TestIMDv3Lammps(IMDv3IntegrationTest):
