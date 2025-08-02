@@ -18,7 +18,7 @@ import copy
 from MDAnalysis.coordinates import core
 
 from quickstream import IMDClient
-from imdclient.tests.utils import parse_host_port
+from imdclient.utils import parse_host_port
 
 # logger = logging.getLogger("imdclient.IMDClient")
 

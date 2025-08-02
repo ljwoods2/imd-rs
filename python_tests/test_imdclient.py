@@ -12,7 +12,6 @@ from MDAnalysisTests.datafiles import (
     COORDINATES_H5MD,
 )
 from quickstream import IMDClient
-import imdclient
 from imdclient.IMDClient import imdframe_memsize
 from imdclient.IMDProtocol import IMDHeaderType
 from imdclient.tests.utils import (
