@@ -10,7 +10,7 @@ from numpy.testing import (
 import docker
 import MDAnalysis as mda
 
-from .utils import get_free_port
+from imdclient.utils import get_free_port
 
 logger = logging.getLogger("imdclient.IMDClient")
 

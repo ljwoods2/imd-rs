@@ -9,7 +9,7 @@ from numpy.testing import (
 import MDAnalysis as mda
 
 from imdclient.tests.base import IMDv3IntegrationTest, assert_allclose_with_logging
-from imndclient.tests.datafiles import (
+from imdclient.tests.datafiles import (
     NAMD_TOPOL,
     NAMD_CONF_NST_1,
     NAMD_CONF_NST_8,

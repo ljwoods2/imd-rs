@@ -5,7 +5,7 @@ import re
 import pytest
 
 from imdclient.tests.base import IMDv3IntegrationTest
-from imdlient.tests.datafiles import (
+from imdclient.tests.datafiles import (
     GROMACS_GRO,
     GROMACS_TOP,
     GROMACS_MDP_NST_1,
