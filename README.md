@@ -7,7 +7,7 @@ First [install rustup](https://rustup.rs/)
 git clone git@github.com:ljwoods2/imd-rs.git
 cd imd-rs
 conda env create --file devtools/conda-envs/test_env.yaml
-conda activate imd-rs-test
+conda activate imdclient-rs-test
 maturin develop --features python
 ```
 
