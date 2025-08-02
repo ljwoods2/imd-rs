@@ -5,9 +5,8 @@ import re
 import pytest
 import MDAnalysis as mda
 
-from .minimalreader import MinimalReader
-from .base import IMDv3IntegrationTest
-from .datafiles import LAMMPS_TOPOL, LAMMPS_IN_NST_1, LAMMPS_IN_NST_8
+from imdlient.tests.base import IMDv3IntegrationTest, MinimalReader
+from imdclient.tests.datafiles import LAMMPS_TOPOL, LAMMPS_IN_NST_1, LAMMPS_IN_NST_8
 
 logger = logging.getLogger("imdclient.IMDClient")
 file_handler = logging.FileHandler("lammps_test.log")
