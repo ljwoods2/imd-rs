@@ -20,12 +20,12 @@ from imdclient.tests.utils import (
 from imdclient.tests.server import InThreadIMDServer
 
 
-# logger = logging.getLogger("imdclient.IMDClient")
-# file_handler = logging.FileHandler("test.log")
-# formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-# file_handler.setFormatter(formatter)
-# logger.addHandler(file_handler)
-# logger.setLevel(logging.DEBUG)
+logger = logging.getLogger("quickstream")
+file_handler = logging.FileHandler("test.log")
+formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
+logger.setLevel(logging.DEBUG)
 
 IMDENERGYKEYS = [
     "step",

@@ -1055,7 +1055,8 @@ impl IMDServer {
 }
 
 #[cfg(feature = "python")]
-mod python_bindings {
+#[pymodule]
+mod quickstream {
     use std::sync::Once;
 
     use super::IMDEnergies;
@@ -1316,12 +1317,12 @@ mod python_bindings {
         // }
     }
 
-    #[pymodule]
-    fn quickstream(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    #[pymodule_init]
+    fn init(m: &Bound<'_, PyModule>) -> PyResult<()> {
         pyo3_log::init();
-        m.add_class::<IMDClient>()?;
-        // m.add_class::<IMDFrame>()?;
-        m.add_class::<IMDSessionInfo>()?;
+        // m.add_class::<IMDClient>()?;
+        // // m.add_class::<IMDFrame>()?;
+        // m.add_class::<IMDSessionInfo>()?;
         Ok(())
     }
 }
