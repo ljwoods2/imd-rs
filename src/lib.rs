@@ -4,9 +4,10 @@ use log::{debug, error, info, trace, warn};
 use ndarray::Array2;
 use pyo3::prelude::*;
 use std::{
-    io::{self, BufReader, ErrorKind, Read, Write},
+    io::{self, BufRead, BufReader, ErrorKind, Read, Write},
     net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs},
     rc::Rc,
+    sync::{Arc, Condvar, Mutex},
     thread::{self, JoinHandle},
     time::Duration,
     vec,
@@ -87,7 +88,6 @@ impl IMDHeader {
     }
 
     fn from_reader(reader: &mut impl ReadBytesExt) -> io::Result<Self> {
-
         let header_type_val = reader.read_i32::<BigEndian>()?;
 
         let length = reader.read_i32::<BigEndian>()?;
@@ -365,8 +365,13 @@ impl IMDFrame {
 //     V2(IMDProducerV2),
 //     V3(IMDProducerV3),
 // }
+#[derive(Debug)]
+struct Shared {
+    consumer_finished: bool,
+}
 
 struct IMDProducer {
+    state: Arc<(Mutex<Shared>, Condvar)>,
     conn: TcpStream,
     reader: BufReader<TcpStream>,
     empty_recv: Receiver<IMDFrame>,
@@ -385,6 +390,7 @@ struct IMDProducer {
 
 impl IMDProducer {
     pub fn new(
+        state: Arc<(Mutex<Shared>, Condvar)>,
         conn: TcpStream,
         empty_recv: Receiver<IMDFrame>,
         full_send: Sender<IMDFrame>,
@@ -421,6 +427,7 @@ impl IMDProducer {
         let reader = BufReader::new(conn.try_clone()?);
 
         Ok(IMDProducer {
+            state,
             conn,
             reader,
             empty_recv,
@@ -438,28 +445,78 @@ impl IMDProducer {
         })
     }
 
-    pub fn run(&mut self) -> io::Result<()> {
-        debug!("I'm the producer and I'm starting");
-        loop {
+    fn data_available(&mut self) -> io::Result<bool> {
+        debug!("Checking if data is available");
+        match self.reader.fill_buf() {
+            Ok(buf) => Ok(!buf.is_empty()), // true if there's data
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => Ok(false), // no data yet
+            Err(e) => Err(e),               // other errors bubble up
+        }
+    }
 
-            if self.paused {
-                if self.empty_recv.len() as f64 <= 0.5 * self.num_frames as f64 {
-                    IMDHeader::resume().write_to(&mut self.conn)?;
-                    self.paused = false;
-                }
+    fn wait_for_space(&mut self) -> io::Result<()> {
+        debug!("Waiting for space");
+        if self.empty_recv.len() as f64 > 0.5 * self.num_frames as f64 {
+            return Ok(());
+        } else {
+            let (lock, cvar) = &*self.state;
+            // acquire the lock
+            debug!("Acquiring lock");
+            let mut shared = lock
+                .lock()
+                .map_err(|_poisoned| io::Error::new(ErrorKind::InvalidData, "lock poisoned"))?;
+
+            // loop exactly like your Python `while …: cond.wait()`
+            while (self.empty_recv.len() as f64 > 0.5 * self.num_frames as f64
+                && !shared.consumer_finished)
+            {
+                debug!("IMDProducer: Waiting…");
+                debug!(
+                    "IMDProducer: consumer_finished: {}",
+                    shared.consumer_finished
+                );
+
+                // this atomically unlocks the mutex and sleeps;
+                // when woken, it re-locks and returns the guard
+                shared = cvar
+                    .wait(shared)
+                    .map_err(|_poisoned| io::Error::new(ErrorKind::InvalidData, "lock poisoned"))?;
             }
-            else {
+            Ok(())
+        }
+    }
+
+    pub fn run(&mut self) -> io::Result<()> {
+        debug!("Producer starting");
+        loop {
+            if !self.paused {
                 // arbitrarily
                 // if <25% of frames are empty
                 // the consumer is working too slow for the simulation
                 // so pause it
-                if self.empty_recv.len() as f64 >= 0.25 * self.num_frames as f64 {
+                debug!("Checking pause condition");
+                if self.empty_recv.len() as f64 <= 0.25 * self.num_frames as f64 {
+                    debug!("Pausing producer");
                     IMDHeader::pause().write_to(&mut self.conn)?;
+                    debug!("Stn paused signal");
                     self.paused = true;
+                    // to fail out when partial frames are parsed in a paused
+                    // state, rather than wait forever
+                    self.conn.set_nonblocking(true)?;
+                    debug!("Set socket to nonblocking");
                 }
             }
+            debug!("Checking if unpause condition met");
+            if self.paused && !self.data_available()? {
+                debug!("unpause condition met");
+                self.wait_for_space()?;
+                debug!("Waited for space");
+                IMDHeader::resume().write_to(&mut self.conn)?;
+                self.paused = false;
+                self.conn.set_nonblocking(false)?;
+            }
 
-            print!("starting loop");
+            debug!("starting loop");
             let empty_frame = match self.empty_recv.recv() {
                 Ok(frame) => frame,
                 Err(e) => {
@@ -473,16 +530,9 @@ impl IMDProducer {
                 }
             };
 
-            print!("Got empty frame");
+            debug!("Got empty frame");
 
-            let full_frame = match self.sinfo.version {
-                2 => self.parse_imdframe_v2(empty_frame),
-                3 => self.parse_imdframe_v3(empty_frame),
-                _ => Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "Invalid version",
-                )),
-            };
+            let full_frame = self.parse_frame(empty_frame);
 
             let full_frame = match full_frame {
                 Ok(f) => f,
@@ -496,7 +546,7 @@ impl IMDProducer {
                 }
             };
 
-            print!("Parsed a frame");
+            debug!("Parsed a frame");
 
             if let Err(e) = self.full_send.send(full_frame) {
                 let _ = IMDHeader::disconnect().write_to(&mut self.conn);
@@ -508,7 +558,18 @@ impl IMDProducer {
                 return Err(err);
             }
 
-            print!("Pushed a frame");
+            debug!("Pushed a frame");
+        }
+    }
+
+    fn parse_frame(&mut self, empty_frame: IMDFrame) -> io::Result<IMDFrame> {
+        match self.sinfo.version {
+            2 => self.parse_imdframe_v2(empty_frame),
+            3 => self.parse_imdframe_v3(empty_frame),
+            _ => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Invalid version",
+            )),
         }
     }
 
@@ -647,8 +708,8 @@ impl IMDProducer {
         Ok(())
     }
 
-    fn read_into_array2<R: Read>(
-        reader: &mut R,
+    fn read_into_array2(
+        reader: &mut impl Read,
         arr: &mut Array2<f32>,
         endian: Endianness,
     ) -> std::io::Result<()> {
@@ -676,6 +737,7 @@ impl IMDProducer {
 }
 #[derive(Debug)]
 pub struct IMDClient {
+    state: Arc<(Mutex<Shared>, Condvar)>,
     sinfo: IMDSessionInfo,
     producer_handle: Option<thread::JoinHandle<io::Result<()>>>,
     full_recv: Receiver<IMDFrame>,
@@ -728,7 +790,14 @@ impl IMDClient {
         debug!("Cloned socket");
         // debug!("Getting a frame {:?}", empty_recv.recv());
 
+        let shared = Shared {
+            consumer_finished: false,
+        };
+        let state = Arc::new((Mutex::new(shared), Condvar::new()));
+        let producer_state = Arc::clone(&state);
+
         let producer_handle = Self::start_producer_thread(
+            producer_state,
             producer_conn,
             empty_recv,
             full_send,
@@ -752,6 +821,7 @@ impl IMDClient {
         // }
 
         Ok(IMDClient {
+            state,
             sinfo,
             producer_handle,
             full_recv,
@@ -762,25 +832,46 @@ impl IMDClient {
         })
     }
 
+    fn notify_consumer_finished(&self) -> io::Result<()> {
+        let (lock, cvar) = &*self.state;
+        let mut shared = lock
+            .lock()
+            .map_err(|_poisoned| io::Error::new(ErrorKind::InvalidData, "lock poisoned"))?;
+        shared.consumer_finished = true;
+        cvar.notify_all();
+        Ok(())
+    }
+
     pub fn get_imdframe(&mut self) -> io::Result<&mut IMDFrame> {
-        let new_imdframe = self
-            .full_recv
-            .recv()
-            .map_err(|e| io::Error::new(ErrorKind::InvalidData, e))?;
+        let new_imdframe = match self.full_recv.recv() {
+            Ok(frame) => frame,
 
-        let prev_frame = self.prev_frame.take();
+            Err(e) => {
+                self.notify_consumer_finished()?;
 
-        if prev_frame.is_some() {
-            self.empty_send
-                .send(prev_frame.expect("Error"))
-                .map_err(|e| io::Error::new(ErrorKind::InvalidData, e))?;
+                return Err(io::Error::new(ErrorKind::InvalidData, e));
+            }
+        };
+
+        if let Some(prev) = self.prev_frame.take() {
+            match self.empty_send.send(prev) {
+                Err(e) => {
+                    self.notify_consumer_finished()?;
+
+                    return Err(io::Error::new(ErrorKind::InvalidData, e));
+                }
+                Ok(()) => {
+                    let (_, cvar) = &*self.state;
+                    cvar.notify_one();
+                }
+            }
         }
 
         self.prev_frame = Some(new_imdframe);
 
         self.prev_frame
             .as_mut()
-            .ok_or_else(|| io::Error::new(ErrorKind::InvalidData, "Failed"))
+            .ok_or_else(|| io::Error::new(ErrorKind::InvalidData, "Failed to retrieve IMDFrame"))
     }
 
     pub fn get_imdsessioninfo(&mut self) -> io::Result<IMDSessionInfo> {
@@ -823,7 +914,7 @@ impl IMDClient {
 
         let header = IMDHeader::from_reader(conn)?;
 
-        print!("Got header!");
+        debug!("Got header!");
 
         debug!("{:?}", header);
 
@@ -906,6 +997,7 @@ impl IMDClient {
     }
 
     fn start_producer_thread(
+        state: Arc<(Mutex<Shared>, Condvar)>,
         conn: TcpStream,
         empty_recv: Receiver<IMDFrame>,
         full_send: Sender<IMDFrame>,
@@ -915,8 +1007,9 @@ impl IMDClient {
         n_atoms: u64,
     ) -> Option<thread::JoinHandle<Result<(), io::Error>>> {
         Some(thread::spawn(move || -> Result<(), io::Error> {
-            let mut producer =
-                IMDProducer::new(conn, empty_recv, full_send, num_frames, error_send, sinfo, n_atoms)?;
+            let mut producer = IMDProducer::new(
+                state, conn, empty_recv, full_send, num_frames, error_send, sinfo, n_atoms,
+            )?;
             producer.run()
         }))
     }
@@ -963,6 +1056,8 @@ impl IMDServer {
 
 #[cfg(feature = "python")]
 mod python_bindings {
+    use std::sync::Once;
+
     use super::IMDEnergies;
     use super::IMDTime;
 
@@ -1210,7 +1305,10 @@ mod python_bindings {
         }
 
         fn stop<'py>(this: Bound<'py, Self>, py: Python<'py>) {
-            let _ = this.borrow_mut().inner.stop();
+            let err = this.borrow_mut().inner.stop().map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyEOFError, _>(format!("IO error: {}", e))
+            });
+            debug!("Shutdown reason: {:?}", err);
         }
 
         // pub fn __enter__(slf: Py<Self>) -> Py<Self> {
@@ -1220,6 +1318,12 @@ mod python_bindings {
 
     #[pymodule]
     fn quickstream(m: &Bound<'_, PyModule>) -> PyResult<()> {
+        static INIT_LOGGER: Once = Once::new();
+
+        INIT_LOGGER.call_once(|| {
+            env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug"))
+                .init();
+        });
         m.add_class::<IMDClient>()?;
         // m.add_class::<IMDFrame>()?;
         m.add_class::<IMDSessionInfo>()?;

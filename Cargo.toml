@@ -21,3 +21,4 @@ byteorder = "1.5"
 crossbeam-channel = "0.5"
 ndarray = { version = "0.16" }
 ctrlc = { version ="3.4", features = ["termination"] }
+env_logger = { version = "0.11"}

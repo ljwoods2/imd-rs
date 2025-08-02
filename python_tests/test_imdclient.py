@@ -98,7 +98,7 @@ class TestIMDClientV3:
         yield server, client
         client.stop()
         server.cleanup()
-        
+
     def test_traj_unchanged(self, server_client, universe):
         server, client = server_client
         server.send_frames(0, 5)

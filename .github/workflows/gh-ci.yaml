@@ -104,81 +104,81 @@ jobs:
         name: codecov-${{ matrix.os }}-py${{ matrix.python-version }}
         verbose: True
 
-  # simulation_engine_tests:
-  #   if: github.repository == 'Becksteinlab/imdclient'
-  #   runs-on: ubuntu-latest
+  simulation_engine_tests:
+    if: github.repository == 'Becksteinlab/imdclient'
+    runs-on: ubuntu-latest
 
-  #   strategy:
-  #     fail-fast: false
-  #     matrix:
-  #       include:
-  #         - name: namd
-  #           image: ghcr.io/becksteinlab/streaming-namd-docker:main-common-cpu
-  #           script: imdclient/tests/test_namd.py
-  #         - name: gromacs
-  #           image: ghcr.io/becksteinlab/streaming-md-docker:main-common-cpu
-  #           script: imdclient/tests/test_gromacs.py
-  #         - name: lammps
-  #           image: ghcr.io/becksteinlab/streaming-md-docker:main-common-cpu
-  #           script: imdclient/tests/test_lammps.py
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # - name: namd
+          #   image: ghcr.io/becksteinlab/streaming-namd-docker:main-common-cpu
+          #   script: imdclient/tests/test_namd.py
+          - name: gromacs
+            image: ghcr.io/becksteinlab/streaming-md-docker:main-common-cpu
+            script: python_tests/test_gromacs.py
+          - name: lammps
+            image: ghcr.io/becksteinlab/streaming-md-docker:main-common-cpu
+            script: python_tests/test_lammps.py
 
-  #   permissions:
-  #     contents: read
-  #     packages: read
+    permissions:
+      contents: read
+      packages: read
 
-  #   steps:
-  #     - uses: actions/checkout@v4
+    steps:
+      - uses: actions/checkout@v4
 
-  #     - name: Build information
-  #       run: |
-  #         uname -a
-  #         df -h
-  #         ulimit -a
+      - name: Build information
+        run: |
+          uname -a
+          df -h
+          ulimit -a
 
-  #     - name: Log in to the Container registry
-  #       uses: docker/login-action@v3
-  #       with:
-  #         registry: ghcr.io
-  #         username: ${{ github.actor }}
-  #         password: ${{ secrets.NAMD_DOCKER_TOKEN }}
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.NAMD_DOCKER_TOKEN }}
 
-  #     - name: Install conda dependencies
-  #       uses: conda-incubator/setup-miniconda@v2
-  #       with:
-  #         python-version: "3.11"
-  #         environment-file: devtools/conda-envs/test_env.yaml
-  #         add-pip-as-python-dependency: true
-  #         architecture: x64
+      - name: Install conda dependencies
+        uses: conda-incubator/setup-miniconda@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+          environment-file: devtools/conda-envs/test_env.yaml
+          add-pip-as-python-dependency: true
+          architecture: ${{ env.ARCHITECTURE }}
 
-  #         channels: conda-forge, defaults
+          channels: conda-forge, defaults
 
-  #         activate-environment: imdclient-test
-  #         auto-update-conda: true
-  #         auto-activate-base: false
-  #         show-channel-urls: true
-  #         miniconda-version: latest
+          activate-environment: imdclient-rs-test
+          auto-update-conda: true
+          auto-activate-base: false
+          show-channel-urls: true
+          miniconda-version: latest
 
-  #     - name: Install package
-  #       run: |
-  #         python --version
-  #         python -m pip install .  --no-deps 
+      - name: Install imdclient
+        run: |
+          python --version
+          maturin develop --features python
 
-  #     - name: Pull container
-  #       run: |
-  #         docker pull ${{ matrix.image }}
+      - name: Pull container
+        run: |
+          docker pull ${{ matrix.image }}
   
-  #     - name: Run simulation engine tests
-  #       run: |
-  #         pytest -v --cov=imdclient --cov-report=xml --color=yes ${{ matrix.script }}
+      - name: Run simulation engine tests
+        run: |
+          pytest -v --cov=imdclient --cov-report=xml --color=yes ${{ matrix.script }}
 
-  #     - name: codecov
-  #       if: github.event_name != 'schedule'
-  #       uses: codecov/codecov-action@v5.4.3
-  #       with:
-  #         token: ${{ secrets.CODECOV_TOKEN }}
-  #         files: coverage.xml
-  #         name: codecov-${{ matrix.name }}
-  #         verbose: True
+      - name: codecov
+        if: github.event_name != 'schedule'
+        uses: codecov/codecov-action@v5.4.3
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.xml
+          name: codecov-${{ matrix.name }}
+          verbose: True
 
   # pylint_check:
   #   if: github.repository == 'Becksteinlab/imdclient'
