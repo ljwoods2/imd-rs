@@ -1077,7 +1077,7 @@ mod python_bindings {
     pub struct IMDClient {
         inner: RustIMDClient,
     }
-    #[pyclass]
+    #[pyclass(dict)]
     pub struct IMDFrame {
         #[pyo3(get)]
         step: Option<i64>,
