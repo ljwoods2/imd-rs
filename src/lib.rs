@@ -1306,7 +1306,7 @@ mod quickstream {
     #[pymethods]
     impl IMDClient {
         #[new]
-        #[pyo3(signature = (host, port, n_atoms, buffer_size=None, continue_after_disconnect=None))]
+        #[pyo3(signature = (host, port, n_atoms, buffer_size=None, continue_after_disconnect=None, **kwargs))]
         fn new(
             py: Python,
             host: &str,
@@ -1314,6 +1314,7 @@ mod quickstream {
             n_atoms: u64,
             buffer_size: Option<u64>,
             continue_after_disconnect: Option<bool>,
+            kwargs: Option<&Bound<'_, PyDict>>,
         ) -> PyResult<Self> {
             py.allow_threads(|| {
                 let addr = format!("{}:{}", host, port);
