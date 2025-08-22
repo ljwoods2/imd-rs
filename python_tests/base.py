@@ -50,7 +50,7 @@ class DummyTimeStep:
             imdframe.velocities.copy() if imdframe.velocities is not None else None
         )
         dts.forces = imdframe.forces.copy() if imdframe.forces is not None else None
-        dts.data = imdframe.data.copy() if imdframe.data is not None else None
+        dts.data = imdframe.energies.copy() if imdframe.energies is not None else None
         return dts
 
 
