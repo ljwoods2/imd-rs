@@ -19,8 +19,39 @@ from MDAnalysis.coordinates import core
 
 from quickstream import IMDClient
 from imdclient.utils import parse_host_port
+import numpy as np
 
 logger = logging.getLogger("quickstream")
+
+
+class DummyTimeStep:
+    def __init__(self):
+        self.time = None
+        self.dt = None
+        self.step = None
+        self.dimensions = None
+        self.positions = None
+        self.velocities = None
+        self.forces = None
+        self.data = None
+
+    def from_imdframe(imdframe):
+        dts = DummyTimeStep()
+        dts.time = imdframe.time
+        dts.dt = imdframe.dt
+        dts.step = imdframe.step
+        dts.dimensions = (
+            core.triclinic_box(*imdframe.box) if imdframe.box is not None else None
+        )
+        dts.positions = (
+            imdframe.positions.copy() if imdframe.positions is not None else None
+        )
+        dts.velocities = (
+            imdframe.velocities.copy() if imdframe.velocities is not None else None
+        )
+        dts.forces = imdframe.forces.copy() if imdframe.forces is not None else None
+        dts.data = imdframe.data.copy() if imdframe.data is not None else None
+        return dts
 
 
 class MinimalReader:
@@ -71,22 +102,15 @@ class MinimalReader:
         self._frame += 1
         self.imd_frame = imd_frame
 
-        # Modify the box dimensions to be triclinic
-        self._modify_box_dimesions()
-
         logger.debug(f"MinimalReader: Loaded frame {self._frame}")
 
-        return self.imd_frame
-
-    def _modify_box_dimesions(self):
-        self.imd_frame.dimensions = core.triclinic_box(*self.imd_frame.box)
+        return DummyTimeStep.from_imdframe(self.imd_frame)
 
     def _process_stream(self):
         # Process the stream of frames
         while True:
             try:
-                self.trajectory.append(copy.deepcopy(self._read_next_frame()))
-                # `.copy()` might not be required but adding it to cover any edge cases where a refernce gets passed
+                self.trajectory.append(self._read_next_frame())
                 logger.debug(f"MinimalReader: Added frame {self._frame} to trajectory")
             except EOFError:
                 break

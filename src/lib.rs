@@ -1078,7 +1078,7 @@ mod quickstream {
     pub struct IMDClient {
         inner: RustIMDClient,
     }
-    #[pyclass(dict)]
+    #[pyclass]
     pub struct IMDFrame {
         #[pyo3(get)]
         step: Option<i64>,
@@ -1155,69 +1155,69 @@ mod quickstream {
                 r#box,
             })
         }
-        #[pyo3(name = "__deepcopy__")]
-        fn __deepcopy__(this: PyRef<Self>, py: Python<'_>, memo: &PyAny) -> PyResult<PyObject> {
-            let copy_mod = PyModule::import(py, "copy")?;
+        //     #[pyo3(name = "__deepcopy__")]
+        //     fn __deepcopy__(this: PyRef<Self>, py: Python<'_>, memo: &PyAny) -> PyResult<PyObject> {
+        //         let copy_mod = PyModule::import(py, "copy")?;
 
-            // 1) grab & deepcopy the user-assigned __dict__
-            let orig_dict_any = this.into_pyobject(py)?.getattr("__dict__")?; // -> PyAny
-            let orig_user_dict: &PyDict = orig_dict_any.downcast()?;
-            let new_user_dict_any = copy_mod
-                .getattr("deepcopy")?
-                .call1((orig_user_dict, memo))?; // deepcopy(orig_user_dict, memo)
-            let new_user_dict: &PyDict = new_user_dict_any.downcast()?;
+        //         // 1) grab & deepcopy the user-assigned __dict__
+        //         let orig_dict_any = this.into_pyobject(py)?.getattr("__dict__")?; // -> PyAny
+        //         let orig_user_dict: &PyDict = orig_dict_any.downcast()?;
+        //         let new_user_dict_any = copy_mod
+        //             .getattr("deepcopy")?
+        //             .call1((orig_user_dict, memo))?; // deepcopy(orig_user_dict, memo)
+        //         let new_user_dict: &PyDict = new_user_dict_any.downcast()?;
 
-            // 2) deepcopy energies dict if present
-            let new_energies = if let Some(e) = &this.energies {
-                let orig = e.as_ref(py);
-                let dup_any = copy_mod.getattr("deepcopy")?.call1((orig, memo))?; // deepcopy(orig_energies, memo)
-                Some(dup_any.downcast::<PyDict>()?.into())
-            } else {
-                None
-            };
+        //         // 2) deepcopy energies dict if present
+        //         let new_energies = if let Some(e) = &this.energies {
+        //             let orig = e.as_ref(py);
+        //             let dup_any = copy_mod.getattr("deepcopy")?.call1((orig, memo))?; // deepcopy(orig_energies, memo)
+        //             Some(dup_any.downcast::<PyDict>()?.into())
+        //         } else {
+        //             None
+        //         };
 
-            // 3) helper: deep-copy each Option<Py<PyArray2<f32>>> in Rust
-            let copy_array =
-                |opt: &Option<Py<PyArray2<f32>>>| -> PyResult<Option<Py<PyArray2<f32>>>> {
-                    if let Some(arr) = opt {
-                        // borrow &PyArray2, view as ndarray, clone into owned Array2
-                        let view = unsafe { arr.as_ref(py) }.as_array();
-                        let owned: ndarray::Array2<f32> = view.to_owned();
-                        // allocate a brand-new NumPy array and copy data
-                        Ok(Some(PyArray2::from_array(py, &owned).into_py(py)))
-                    } else {
-                        Ok(None)
-                    }
-                };
+        //         // 3) helper: deep-copy each Option<Py<PyArray2<f32>>> in Rust
+        //         let copy_array =
+        //             |opt: &Option<Py<PyArray2<f32>>>| -> PyResult<Option<Py<PyArray2<f32>>>> {
+        //                 if let Some(arr) = opt {
+        //                     // borrow &PyArray2, view as ndarray, clone into owned Array2
+        //                     let view = unsafe { arr.as_ref(py) }.as_array();
+        //                     let owned: ndarray::Array2<f32> = view.to_owned();
+        //                     // allocate a brand-new NumPy array and copy data
+        //                     Ok(Some(PyArray2::from_array(py, &owned).into_py(py)))
+        //                 } else {
+        //                     Ok(None)
+        //                 }
+        //             };
 
-            // 4) build a fresh Rust IMDFrame
-            let new_frame = IMDFrame {
-                step: this.step,
-                dt: this.dt,
-                time: this.time,
-                energies: new_energies,
-                positions: copy_array(&this.positions)?,
-                velocities: copy_array(&this.velocities)?,
-                forces: copy_array(&this.forces)?,
-                r#box: copy_array(&this.r#box)?,
-            };
+        //         // 4) build a fresh Rust IMDFrame
+        //         let new_frame = IMDFrame {
+        //             step: this.step,
+        //             dt: this.dt,
+        //             time: this.time,
+        //             energies: new_energies,
+        //             positions: copy_array(&this.positions)?,
+        //             velocities: copy_array(&this.velocities)?,
+        //             forces: copy_array(&this.forces)?,
+        //             r#box: copy_array(&this.r#box)?,
+        //         };
 
-            // 5) wrap it in a new Python object
-            let py_new = Py::new(py, new_frame)?;
-            let new_obj = py_new.as_ref(py);
+        //         // 5) wrap it in a new Python object
+        //         let py_new = Py::new(py, new_frame)?;
+        //         let new_obj = py_new.as_ref(py);
 
-            // 6) overwrite its __dict__ with our deep-copied one
-            let target_dict_any = new_obj.getattr("__dict__")?;
-            let target_dict: &PyDict = target_dict_any.downcast()?;
-            target_dict.clear();
-            for (k, v) in new_user_dict.iter() {
-                target_dict.set_item(k, v)?;
-            }
+        //         // 6) overwrite its __dict__ with our deep-copied one
+        //         let target_dict_any = new_obj.getattr("__dict__")?;
+        //         let target_dict: &PyDict = target_dict_any.downcast()?;
+        //         target_dict.clear();
+        //         for (k, v) in new_user_dict.iter() {
+        //             target_dict.set_item(k, v)?;
+        //         }
 
-            Ok(py_new.into())
-        }
+        //         Ok(py_new.into())
+        //     }
     }
-    #[pyclass(dict)]
+    #[pyclass]
     pub struct IMDSessionInfo {
         inner: RustIMDSessionInfo,
     }
